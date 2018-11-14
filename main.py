@@ -1,11 +1,11 @@
 from keras.models import Sequential
 from keras.layers import Embedding, Dense, GRU, TimeDistributed, Flatten
-from keras.preprocessing import sequence
 from keras.preprocessing.text import Tokenizer
 from keras.preprocessing.sequence import pad_sequences
-from keras.utils import to_categorical
+from keras.utils import to_categorical, Sequence
 import os
 import numpy as np
+import generator
 
 ############################
 ### Variable definitions ###
@@ -17,69 +17,34 @@ training_samples = 3000
 validation_samples = 1000
 batch_size = 32
 
-############################
-###      Directory       ###
-############################
-
 base_dir = '/Users/johnbrandt/Documents/python_projects/nlp_final'
-whole_reviews = 'whole-reviews/'
-authors = ['DennisSchwartz', 'JamesBerardinelli', 'ScottRenshaw', 'SteveRhodes']
-whole_reviews_dir = os.path.join(base_dir, whole_reviews)
-labels_dir = os.path.join(base_dir, "parsed-reviews/")
+ids = os.path.join(base_dir, 'parsed-reviews/collated/id_all.txt')
+labels = os.path.join(base_dir, 'parsed-reviews/collated/label_3.txt')
 
-############################################################################################
-# read_data reads in raw review data and classified labels (0,1,2) and does the following: #
-# 	1. Generate list of reviews and classifications										   #
-#   2. Tokenize and pad reviews                         								   #
-#.  3. One-hot encode classifications													   #
-############################################################################################
+def import_data(ids, labels):
+	ids_list = []
+	labs_list = []
 
-def read_data():
-	print('\n####################### \n### Reading in data ###\n####################### \n\n')
-	texts = []
-	for author in authors: # Iterate through folders of author data
-		author_dir = os.path.join(whole_reviews_dir, author, 'txt')
-		for fname in os.listdir(author_dir):
-		    if fname[-4:] == ".txt":
-		        f = open(os.path.join(author_dir, fname), encoding = "ISO-8859-1") 
-		        texts.append(f.read()) # Read in each review and append to text list
-		        f.close()
+	for line in open(ids):
+	    ids_list.append(str.strip(line))
 
-	tokenizer = Tokenizer(num_words = max_words)
-	tokenizer.fit_on_texts(texts)
-	sequences = tokenizer.texts_to_sequences(texts)
-	data = pad_sequences(sequences, maxlen = max_len) # Pad reviews under 500 words
+	for line in open(labels):
+	    labs_list.append(str.strip(line))
 
-	labels = []
-	for author in authors: # Iterate through folders of author data
-		author_dir = os.path.join(labels_dir, author, 'label_3.txt')
-		for line in open(author_dir):
-		    labels.append(str.strip(line))
-	print("Found {} files".format(len(texts)))
-	labels = to_categorical(labels)
-	return(data, labels)
+	return({key:value for key, value in zip(ids_list, labs_list)})
 
-############################################################################################
-# split_train takes the data and labels to:												   #
-#	1. Shuffle data to randomize													       #
-#	2. Generate training and validation based on ArgumentParser 						   #
-#	3. Return x_train, y_train, x_val, and y_val										   #
-############################################################################################
-        
-def split_train(labels, data, data_size, training_samples, validation_samples):
-	print('\n########################################### \n### Splitting train and validation data ###\n###########################################\n\n')
-	indices = np.arange(data_size) 
-	np.random.shuffle(indices) # Create randomized array from 1...data size
-	data = data[indices] # Reindex data randomly to shuffle
-	labels = np.array(labels)[indices] # Reindex labels randomly to shuffle
+def split_train(data, training_samples, validation_samples):
+    keys = list(data.keys())
+    values = list(data.values())
+    indices = np.arange(len(data.keys()))
+    np.random.shuffle(indices)
 
-	x_train = data[:training_samples]
-	y_train = labels[:training_samples]
-
-	x_val = data[training_samples : training_samples + validation_samples]
-	y_val = labels[training_samples : training_samples + validation_samples]
-	print("There are {} training and {} validation samples of {} classes".format(y_train.shape[0], y_val.shape[0], y_train.shape[1]))
-	return(x_train, y_train, x_val, y_val)
+    train_x = keys[ : training_samples]
+    train_y = values[ : training_samples]
+    
+    validation_x = keys[training_samples : training_samples + validation_samples]
+    validation_y = values[training_samples : training_samples + validation_samples]
+    return(train_x, train_y, validation_x, validation_y)
 
 ############################################################################################
 # make_model returns the following architecture:	     								   #
@@ -99,10 +64,13 @@ def make_model():
 	return(model)
 
 def main():
-	(data, labels) = read_data()
-	data_size = data.shape[0]
-	(x_train, y_train, x_val, y_val) = split_train(labels, data, data_size, training_samples, validation_samples)
 	model = make_model()
+	data = import_data(ids, labels)
+
+	train_x, train_y, validation_x, validation_y = split_train(data, 2000, 1000)
+
+	training_generator = generator.DataGenerator(train_x, train_y, batch_size = batch_size, n_classes = 3)
+	validation_generator = generator.DataGenerator(validation_x, validation_y, batch_size = batch_size, n_classes = 3)
 
 	model.compile(loss = "binary_crossentropy",
 		optimizer = "rmsprop",
@@ -110,11 +78,10 @@ def main():
 
 	print('\n\n\n')
 
-	history = model.fit(x_train, y_train,
-		batch_size = batch_size,
-		epochs = epochs,
-		validation_data =(x_val, y_val))
+	model.fit_generator(generator = training_generator,
+                   validation_data = validation_generator, epochs = 3)
 
+	print("Saving model weights to simple_lstm.h5")
 	model.save_weights("simple_lstm.h5")
 
 
@@ -128,11 +95,11 @@ if __name__ == "__main__":
 		formatter_class = argparse.ArgumentDefaultsHelpFormatter)
 	parser.add_argument('--dimension', default = 200, type = int)
 	parser.add_argument('--epochs', default = 10, type = int)
+	parser.add_argument('--batch_size', default = 32, type = int)
 	args = parser.parse_args()
-
 
 	dimension = args.dimension
 	epochs = args.epochs
-
+	batch_size = args.batch_size
 	main()
 
