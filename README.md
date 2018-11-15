@@ -16,7 +16,7 @@ Python 3.6 is required and the dependences can be installed with:
  ```
  python setup.py --install
  ```
-## Useage
+## Usage
 
 ```
 python main.py --epochs {} --training_size {} --batch_size {}
