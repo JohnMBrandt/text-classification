@@ -17,7 +17,6 @@ max_len = 500
 max_words = 10000
 training_samples = 3000
 validation_samples = 1000
-batch_size = 32
 
 base_dir = '/Users/johnbrandt/Documents/python_projects/nlp_final'
 ids = os.path.join(base_dir, 'parsed-reviews/collated/id_all.txt')
@@ -32,16 +31,15 @@ def import_data(ids, labels):
 	    labs_list.append(str.strip(line))
 	return({key:value for key, value in zip(ids_list, labs_list)})
 
-def split_train(data, training_samples, validation_samples):
+def split_train(data, training_samples, validation_samples, n_classes):
     keys = list(data.keys())
     values = list(data.values())
-    print(values.count("0"), values.count("1"), values.count("2"))
+    for i in range(0, n_classes):
+    	print('Data class {}: {}'.format(i, values.count(str(i))))
     indices = np.arange(len(keys))
     np.random.shuffle(indices)
     keys = np.array(keys)[indices].tolist()
     values = np.array(values)[indices].tolist()
-    print(len(keys))
-
     train_x = keys[ : training_samples]
     train_y = values[ : training_samples]
     
@@ -67,33 +65,33 @@ def make_model():
     return(classifier)
 
 def main():
+	print('\n### Loading parameter definitions ###')
 	n_classes = 3
 	print('Batch size: {} \nEpochs: {} \n'.format(batch_size, epochs))
 	data = import_data(ids, labels)
 
-	train_x, train_y, validation_x, validation_y = split_train(data, training_samples, 1000)
+	train_x, train_y, validation_x, validation_y = split_train(data, training_samples, 1000, n_classes)
 	print('Training samples: {}\nValidation samples: {}\n'.format(len(train_x), len(validation_x)))
-
 	for i in range(0, n_classes):
 		print('Training class ' + str(i) + ": {}".format(train_y.count(str(i))) + "      " + 
 			'   Validation ' + str(i) + ": {}".format(validation_y.count(str(i))))
 
+	print('\n### Creating generator and tokenizer ###')
 	training_generator = generator.DataGenerator(train_x, train_y,
 		batch_size = batch_size, n_classes = n_classes)
 	validation_generator = generator.DataGenerator(validation_x, validation_y,
 		batch_size = batch_size, n_classes = n_classes)
 
 	classifier = make_model()
+
+	print('\n### Compiling model with binary crossentropy loss and rmsprop optimizer ###')
 	classifier.compile(loss = "binary_crossentropy",
 		optimizer = "rmsprop",
 		metrics = ['categorical_accuracy'])
-
-	print('\n\n\n')
-
 	classifier.fit_generator(generator = training_generator,
                    validation_data = validation_generator, epochs = epochs)
 
-	print("\n ### Saving model weights to simple_lstm.h5 ###")
+	print("\n### Saving model weights to simple_lstm.h5 ###")
 	classifier.save_weights("simple_lstm.h5")
 
 

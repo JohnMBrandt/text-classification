@@ -28,18 +28,6 @@ def clean_str(string):
         string = re.sub(r"\s{2,}", " ", string)
         return string.strip().lower()
 
-def generate_vocab(dir):
-    files = []
-    for i, ID in enumerate(os.listdir(os.path.join(dir, "whole-reviews/collated"))):
-        file = open(os.path.join(dir, "whole-reviews/collated/", ID), encoding = "ISO-8859-1")
-        cleaned = clean_str(file.read())
-        files.append(cleaned)
-    l = Tokenizer(10000)
-    l.fit_on_texts(files)
-    return(l)
-
-tokenizer = generate_vocab(base_dir)
-
 class DataGenerator(Sequence):
     def __init__(self, files, labels, batch_size = 32, 
         n_classes = 3, max_words = 10000, max_len = 500):
@@ -52,6 +40,7 @@ class DataGenerator(Sequence):
         self.max_len = max_len
         self.shuffle = False
         self.on_epoch_end()
+        self.tokenizer = self.generate_vocab(base_dir)
         
     def __len__(self):
         return int(np.floor(len(self.files) / self.batch_size))
@@ -61,6 +50,17 @@ class DataGenerator(Sequence):
         files_temp = [self.files[k] for k in indexes]
         x, y = self.__data_generation(files_temp)
         return x, y
+
+    def generate_vocab(self, dir):
+        files = []
+        for i, ID in enumerate(os.listdir(os.path.join(dir, "whole-reviews/collated"))):
+            file = open(os.path.join(dir, "whole-reviews/collated/", ID), encoding = "ISO-8859-1")
+            cleaned = clean_str(file.read())
+            files.append(cleaned)
+        l = Tokenizer(self.max_words)
+        l.fit_on_texts(files)
+        print('Created tokenizer with a {} vocab fit on {} documents'.format(self.max_words, len(files)))
+        return(l)
     
     def on_epoch_end(self):
         'Updates indexes after each epoch'
@@ -81,6 +81,6 @@ class DataGenerator(Sequence):
 
         #tokenizer = Tokenizer(num_words = self.max_words)
         #zxtokenizer.fit_on_texts(x)
-        sequences = tokenizer.texts_to_sequences(x)
+        sequences = self.tokenizer.texts_to_sequences(x)
         x = pad_sequences(sequences, maxlen = self.max_len)
         return x, to_categorical(y, num_classes = self.n_classes)
