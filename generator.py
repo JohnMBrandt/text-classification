@@ -3,9 +3,42 @@ from keras.preprocessing.sequence import pad_sequences
 from keras.utils import to_categorical, Sequence
 import os
 import numpy as np
+import re
+from collections import Counter
 
 base_dir = '/Users/johnbrandt/Documents/python_projects/nlp_final'
 
+def clean_str(string):
+        string = re.sub(r"[^A-Za-z0-9(),.!?_\"\'\`]", " ", string)
+        string = re.sub(r"\'s", " \'s", string)
+        string = re.sub(r"\"", " \" ", string)
+        string = re.sub(r"\'ve", " \'ve", string)
+        string = re.sub(r"n\'t", " n\'t", string)
+        string = re.sub(r"\'m", " \'m", string)
+        string = re.sub(r"\'re", " \'re", string)
+        string = re.sub(r"\'d", " \'d", string)
+        string = re.sub(r"\'ll", " \'ll", string)
+        string = re.sub(r",", " , ", string)
+        string = re.sub(r"\.", " . ", string)
+        string = re.sub(r"!", " ! ", string)
+        string = re.sub(r"\$", " $ ", string)
+        string = re.sub(r"\(", " \( ", string)
+        string = re.sub(r"\)", " \) ", string)
+        string = re.sub(r"\?", " \? ", string)
+        string = re.sub(r"\s{2,}", " ", string)
+        return string.strip().lower()
+
+def generate_vocab(dir):
+    files = []
+    for i, ID in enumerate(os.listdir(os.path.join(dir, "whole-reviews/collated"))):
+        file = open(os.path.join(dir, "whole-reviews/collated/", ID), encoding = "ISO-8859-1")
+        cleaned = clean_str(file.read())
+        files.append(cleaned)
+    l = Tokenizer(10000)
+    l.fit_on_texts(files)
+    return(l)
+
+tokenizer = generate_vocab(base_dir)
 
 class DataGenerator(Sequence):
     def __init__(self, files, labels, batch_size = 32, 
@@ -41,12 +74,13 @@ class DataGenerator(Sequence):
 
         for i, ID in enumerate(files_temp):
             file = open(os.path.join(base_dir, "whole-reviews/collated/", ID + ".txt"), encoding = "ISO-8859-1")
-            x.append(file.read())
+            cleaned = clean_str(file.read())
+            x.append(cleaned)
             file.close()
             y[i] = self.labels[self.files.index(ID)]
 
-        tokenizer = Tokenizer(num_words = self.max_words)
-        tokenizer.fit_on_texts(x)
+        #tokenizer = Tokenizer(num_words = self.max_words)
+        #zxtokenizer.fit_on_texts(x)
         sequences = tokenizer.texts_to_sequences(x)
         x = pad_sequences(sequences, maxlen = self.max_len)
         return x, to_categorical(y, num_classes = self.n_classes)
