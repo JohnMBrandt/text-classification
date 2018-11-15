@@ -6,8 +6,6 @@ import numpy as np
 import re
 from collections import Counter
 
-base_dir = '/Users/johnbrandt/Documents/python_projects/nlp_final'
-
 def clean_str(string):
         string = re.sub(r"[^A-Za-z0-9(),.!?_\"\'\`]", " ", string)
         string = re.sub(r"\'s", " \'s", string)
@@ -30,7 +28,7 @@ def clean_str(string):
 
 class DataGenerator(Sequence):
     def __init__(self, files, labels, batch_size = 32, 
-        n_classes = 3, max_words = 10000, max_len = 500):
+        n_classes = 3, max_words = 10000, max_len = 500, base_dir = os.getcwd()):
 
         self.batch_size = batch_size
         self.labels = labels
@@ -39,8 +37,9 @@ class DataGenerator(Sequence):
         self.max_words = max_words
         self.max_len = max_len
         self.shuffle = False
+        self.base_dir = base_dir
         self.on_epoch_end()
-        self.tokenizer = self.generate_vocab(base_dir)
+        self.tokenizer = self.generate_vocab(self.base_dir)
         
     def __len__(self):
         return int(np.floor(len(self.files) / self.batch_size))
@@ -59,7 +58,7 @@ class DataGenerator(Sequence):
             files.append(cleaned)
         l = Tokenizer(self.max_words)
         l.fit_on_texts(files)
-        print('Created tokenizer with a {} vocab fit on {} documents'.format(self.max_words, len(files)))
+        print('Created tokenizer with a {} vocab fit on {} documents padded to {} words'.format(self.max_words, len(files), self.max_len))
         return(l)
     
     def on_epoch_end(self):
@@ -73,14 +72,12 @@ class DataGenerator(Sequence):
         y = np.empty((self.batch_size), dtype = int)
 
         for i, ID in enumerate(files_temp):
-            file = open(os.path.join(base_dir, "whole-reviews/collated/", ID + ".txt"), encoding = "ISO-8859-1")
+            file = open(os.path.join(self.base_dir, "whole-reviews/collated/", ID + ".txt"), encoding = "ISO-8859-1")
             cleaned = clean_str(file.read())
             x.append(cleaned)
             file.close()
             y[i] = self.labels[self.files.index(ID)]
 
-        #tokenizer = Tokenizer(num_words = self.max_words)
-        #zxtokenizer.fit_on_texts(x)
         sequences = self.tokenizer.texts_to_sequences(x)
         x = pad_sequences(sequences, maxlen = self.max_len)
         return x, to_categorical(y, num_classes = self.n_classes)

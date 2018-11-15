@@ -13,15 +13,6 @@ import model
 ### Variable definitions ###
 ############################
 
-max_len = 500
-max_words = 10000
-training_samples = 3000
-validation_samples = 1000
-
-base_dir = '/Users/johnbrandt/Documents/python_projects/nlp_final'
-ids = os.path.join(base_dir, 'parsed-reviews/collated/id_all.txt')
-labels = os.path.join(base_dir, 'parsed-reviews/collated/label_3.txt')
-
 def import_data(ids, labels):
 	ids_list = []
 	labs_list = []
@@ -57,7 +48,7 @@ def split_train(data, training_samples, validation_samples, n_classes):
 def make_model():
     classifier = Sequential()
     classifier.add(Embedding(max_words, dimension, input_length = max_len))
-    classifier.add(GRU(100, return_sequences = True, dropout = 0.2))
+    classifier.add(GRU(100, return_sequences = True, dropout = 0.3, recurrent_dropout = 0.3))
     classifier.add(TimeDistributed(Dense(50)))
     classifier.add(model.AttentionWithContext())
     classifier.add(Dense(3, activation = "softmax"))
@@ -66,7 +57,6 @@ def make_model():
 
 def main():
 	print('\n### Loading parameter definitions ###')
-	n_classes = 3
 	print('Batch size: {} \nEpochs: {} \n'.format(batch_size, epochs))
 	data = import_data(ids, labels)
 
@@ -78,12 +68,14 @@ def main():
 
 	print('\n### Creating generator and tokenizer ###')
 	training_generator = generator.DataGenerator(train_x, train_y,
-		batch_size = batch_size, n_classes = n_classes)
+		batch_size = batch_size, n_classes = n_classes,
+		 max_words = max_words, max_len = max_len, base_dir = base_dir)
+
 	validation_generator = generator.DataGenerator(validation_x, validation_y,
-		batch_size = batch_size, n_classes = n_classes)
+		batch_size = batch_size, n_classes = n_classes,
+		 max_words = max_words, max_len = max_len, base_dir = base_dir)
 
 	classifier = make_model()
-
 	print('\n### Compiling model with binary crossentropy loss and rmsprop optimizer ###')
 	classifier.compile(loss = "binary_crossentropy",
 		optimizer = "rmsprop",
@@ -107,11 +99,23 @@ if __name__ == "__main__":
 	parser.add_argument('--epochs', default = 3, type = int)
 	parser.add_argument('--batch_size', default = 32, type = int)
 	parser.add_argument('--training_samples', default = 2000, type = int)
+	parser.add_argument('--n_classes', default = 3, type = int)
+	parser.add_argument('--validation_samples', default = 500, type = int)
+	parser.add_argument('--max_len', default = 500, type = int)
+	parser.add_argument('--max_words', default = 10000, type = int)
+	parser.add_argument('--base_dir', default = os.getcwd())
 	args = parser.parse_args()
 
 	dimension = args.dimension
 	epochs = args.epochs
 	batch_size = args.batch_size
 	training_samples = args.training_samples
+	n_classes = args.n_classes
+	validation_samples = args.validation_samples
+	max_len = args.max_len
+	max_words = args.max_words
+	base_dir = args.base_dir
+	ids = os.path.join(base_dir, 'parsed-reviews/collated/id_all.txt')
+	labels = os.path.join(base_dir, 'parsed-reviews/collated/label_3.txt')
 	main()
 
