@@ -5,7 +5,20 @@ import os
 import numpy as np
 import re
 from collections import Counter
+import pickle
+from statistics import mean
 
+# helper function to save files with pickle
+def save_obj(obj, name):
+    with open('obj/' + name + '.pkl', 'wb+') as f:
+        pickle.dump(obj, f, pickle.HIGHEST_PROTOCOL)
+
+# helper function to load files with pickle
+def load_obj(name):
+    with open("obj/" + name + ".pkl", "rb") as f:
+        return pickle.load(f)
+
+# data cleaning function
 def clean_str(string):
         string = re.sub(r"[^A-Za-z0-9(),.!?_\"\'\`]", " ", string)
         string = re.sub(r"\'s", " \'s", string)
@@ -16,19 +29,20 @@ def clean_str(string):
         string = re.sub(r"\'re", " \'re", string)
         string = re.sub(r"\'d", " \'d", string)
         string = re.sub(r"\'ll", " \'ll", string)
-        string = re.sub(r",", " , ", string)
+        string = re.sub(r",", "", string)
         string = re.sub(r"\.", " . ", string)
-        string = re.sub(r"!", " ! ", string)
-        string = re.sub(r"\$", " $ ", string)
-        string = re.sub(r"\(", " \( ", string)
-        string = re.sub(r"\)", " \) ", string)
+        string = re.sub(r"!", "", string)
+        string = re.sub(r'"', "", string)
+        string = re.sub(r"\$", "", string)
+        string = re.sub(r"\(", "", string)
+        string = re.sub(r"\)", "", string)
         string = re.sub(r"\?", " \? ", string)
         string = re.sub(r"\s{2,}", " ", string)
         return string.strip().lower()
 
 class DataGenerator(Sequence):
     def __init__(self, files, labels, batch_size = 32, 
-        n_classes = 3, max_words = 10000, max_len = 500, base_dir = os.getcwd()):
+        n_classes = 17, max_words = 10000, max_len = 50, base_dir = os.getcwd()):
 
         self.batch_size = batch_size
         self.labels = labels
@@ -39,7 +53,8 @@ class DataGenerator(Sequence):
         self.shuffle = False
         self.base_dir = base_dir
         self.on_epoch_end()
-        self.tokenizer = self.generate_vocab(self.base_dir)
+        self.tokenizer = self.generate_vocab(os.path.join(self.base_dir, "ndc-data"))
+        self.y_labs = self.load_labs("labels_dictionary")
         
     def __len__(self):
         return int(np.floor(len(self.files) / self.batch_size))
@@ -50,17 +65,32 @@ class DataGenerator(Sequence):
         x, y = self.__data_generation(files_temp)
         return x, y
 
+    def load_labs(self, name):
+        with open("obj/" + name + ".pkl", "rb") as f:
+            return pickle.load(f)
+
+    def multihot(self, arr):
+        trial_int = [int(i) - 1 for i in arr]
+        y = np.zeros(17)
+        for i in range(0, len(y) - 1):
+            if i in trial_int:
+                y[i] = 1
+        return(y)
+
     def generate_vocab(self, dir):
         files = []
-        for i, ID in enumerate(os.listdir(os.path.join(dir, "whole-reviews/collated"))):
-            file = open(os.path.join(dir, "whole-reviews/collated/", ID), encoding = "ISO-8859-1")
+        for file in os.listdir(os.path.join(self.base_dir, dir)):
+            file = open(os.path.join(self.base_dir, dir, file), encoding = "ISO-8859-1")
             cleaned = clean_str(file.read())
             files.append(cleaned)
+        ##### NEW
+        #files = set(files)
         l = Tokenizer(self.max_words)
         l.fit_on_texts(files)
+        save_obj(l.word_index, "word_index")
         print('Created tokenizer with a {} vocab fit on {} documents padded to {} words'.format(self.max_words, len(files), self.max_len))
         return(l)
-    
+
     def on_epoch_end(self):
         'Updates indexes after each epoch'
         self.indexes = np.arange(len(self.files))
@@ -69,15 +99,16 @@ class DataGenerator(Sequence):
         
     def __data_generation(self, files_temp):
         x = []
-        y = np.empty((self.batch_size), dtype = int)
-
-        for i, ID in enumerate(files_temp):
-            file = open(os.path.join(self.base_dir, "whole-reviews/collated/", ID + ".txt"), encoding = "ISO-8859-1")
+        y = np.empty(17)
+        for ID in files_temp:
+            file = open(os.path.join(self.base_dir, "ndc-data", str(ID) + ".txt"), encoding = "ISO-8859-1")
             cleaned = clean_str(file.read())
+            y_temp = self.y_labs.get(ID)
             x.append(cleaned)
             file.close()
-            y[i] = self.labels[self.files.index(ID)]
+            y = np.vstack([y, [self.multihot(y_temp)]])
+        y = y[1:]
 
         sequences = self.tokenizer.texts_to_sequences(x)
         x = pad_sequences(sequences, maxlen = self.max_len)
-        return x, to_categorical(y, num_classes = self.n_classes)
+        return x, y
