@@ -2,7 +2,7 @@
 
 This is a work-in-progress text classification architecture that jointly learns to classify sentences and documents by multi-task training with an extractive summarizer.
 
-The model is currently a GRU with hierarchical attention using pre-trained gloVe embeddings
+The model is currently a GRU with hierarchical attention using pre-trained gloVe embeddings. Epochs are about 60 seconds on an NVidia Titan X.
 
 ## Next Steps
 Next steps:
