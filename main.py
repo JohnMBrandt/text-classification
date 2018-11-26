@@ -14,6 +14,7 @@ import model
 from random import choices
 
 def split_train(training_samples, validation_samples, test_samples):
+    'Split data into train, val, and test splits'
     data = generator.load_obj("labels_dictionary")
     x = list(data.keys())
     y = list(data.values())
@@ -30,14 +31,18 @@ def split_train(training_samples, validation_samples, test_samples):
     test_y = y[training_samples + validation_samples : training_samples + validation_samples + test_samples]
     return(train_x, train_y, validation_x, validation_y, test_x, test_y)
 
-def get_possibilities(i, train_y):
+def get_possibilities(i, train_y, rm):
+	'Returns all training samples with i label'
 	poss = []
 	for x, ID in enumerate(train_y):
-		if str(i + 1) in ID:
-			poss.append(x)
+		e = [i for i in ID if i in rm]
+		if len(e) == 0:
+			if str(i + 1) in ID:
+				poss.append(x)
 	return(poss)
 
 def add_augmented(train_x, train_y, thresh):
+	'Augments training dataset by bootstrapping underrepresented classes'
 	augmented_y = []
 	augmented_x = []
 	class_freq = []
@@ -49,12 +54,14 @@ def add_augmented(train_x, train_y, thresh):
 	for i in range(1, n_classes + 1):
 		class_freq.append(list(all_y_train).count(str(i)))
 	class_prop = [round(x/baseline,2) for x in class_freq]
+	oversampled = [x for x in set(all_y_train) if all_y_train.count(x) > 2*baseline]
+	print("Not augmenting with labels from classes {} due to oversampling".format(oversampled))
 
 	for i, val in enumerate(class_prop):
 		if val < thresh:
 			new_samples = math.floor(baseline * thresh - class_freq[i])
 			print("Augmenting class {} with {} new samples".format(i + 1, new_samples))
-			sample_choices = get_possibilities(i, train_y)
+			sample_choices = get_possibilities(i, train_y, oversampled)
 			augmented_ids = np.random.choice(sample_choices, new_samples)
 			augmented_y.append([train_y[i] for i in augmented_ids])
 			augmented_x.append([train_x[i] for i in augmented_ids])
@@ -65,6 +72,7 @@ def add_augmented(train_x, train_y, thresh):
 	
 def load_embeddings(embed_dir, name, base_dir, max_words,
 					word_index = "word_index", embedding_dim = 300):
+	'Calculate pre-trained gloVe embeddings for datat'
 	print("\n### Calculating pre-trained gloVe embeddings ###")
 	word_index = generator.load_obj(word_index)
 	embeddings_index = {}
@@ -88,6 +96,7 @@ def load_embeddings(embed_dir, name, base_dir, max_words,
 	return(embedding_matrix)
 
 def make_model(embedding_matrix, n_classes):
+    'Create keras model object for bidirectional LSTM with attetntion'
     classifier = Sequential()
     classifier.add(Embedding(max_words, dimension, input_length = max_len))
     classifier.add(Bidirectional(LSTM(50, return_sequences = True, dropout = 0.6, recurrent_dropout = 0.6)))
@@ -101,12 +110,18 @@ def make_model(embedding_matrix, n_classes):
     classifier.summary()
     return(classifier)
 
+def top_3_accuracy(y_true, y_pred):
+	return top_k_categorical_accuracy(y_true, y_pred, k=3)
+
+def top_1_accuracy(y_true, y_pred):
+	return top_k_categorical_accuracy(y_true, y_pred, k=1)
+
 def main():
 	print('\n### Loading parameter definitions ###')
 	print('Batch size: {} \nEpochs: {} \n'.format(batch_size, epochs))
 
 	train_x, train_y, validation_x, validation_y, test_x, test_y = split_train(training_samples, validation_samples, test_samples)
-	print('Training samples: {}\nValidation samples: {}\n'.format(len(train_x), len(validation_x)))
+	print('Training samples: {}\nValidation samples: {}\n Test samples: {}\n'.format(len(train_x), len(validation_x), len(test_x)))
 	
 	class_freq = []
 	all_y_train = [item for sublist in train_y for item in set(sublist)]
@@ -129,7 +144,7 @@ def main():
 	for i in range(1, n_classes + 1):
 		class_freq.append(all_y_train.count(str(i)))
 
-	print("Sum of class freq {}".format(sum(class_freq)))
+	print("\n")
 	for i in range(1, n_classes + 1):
 		print('Training class ' + str(i) + ": {}".format(class_freq[i - 1]) + "      " + 
 			'   Validation ' + str(i) + ": {}".format(list(validation_y).count(str(i))))
@@ -151,28 +166,21 @@ def main():
 		max_words = max_words, name = "glove.6B.300d.txt")
 
 	classifier = make_model(embedding_matrix = embedding_matrix, n_classes = n_classes)
-	print('\n### Compiling model with categorical crossentropy loss and rmsprop optimizer ###')
-	#class_weights = []
-	#for i in range(1, n_classes + 1):
-	#	class_weights.append(list(train_y).count(str(i))/len(train_y))
-	#print(class_weights)
-
-	def top_3_accuracy(y_true, y_pred):
-		return top_k_categorical_accuracy(y_true, y_pred, k=3)
-
-	def top_1_accuracy(y_true, y_pred):
-		return top_k_categorical_accuracy(y_true, y_pred, k=1)
+	print('\n### Compiling model with binary crossentropy loss and rmsprop optimizer ###')
 
 	classifier.compile(loss = "binary_crossentropy",
 		optimizer = "adam",
 		metrics = [top_3_accuracy, top_1_accuracy])
 
-	#class_weights = {}
-	#for i in range(1, n_classes + 1):
-	#	count = list(train_y).count(str(i))
-	#	class_weights.update({i-1 : 1/count})
+	class_weights = {}
+	for i in range(0, n_classes):
+		count = all_y_train.count(str(i + 1))
+		class_weights.update({i : round(1/count, 4)*1000})
+
+	print("Class weights: {}".format(class_weights))
 	classifier.fit_generator(generator = training_generator,
-                   validation_data = validation_generator, epochs = epochs)
+                   validation_data = validation_generator, epochs = epochs,
+                   class_weight = class_weights)
 
 	probabilities = classifier.predict_generator(generator = test_generator)
 	generator.save_obj(probabilities, "pred_y")
