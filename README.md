@@ -2,13 +2,16 @@
 
 This is a work-in-progress text classification architecture that jointly learns to classify sentences and documents by multi-task training with an extractive summarizer.
 
-The model is currently a GRU with hierarchical attention. 
+The model is currently a GRU with hierarchical attention using pre-trained gloVe embeddings
 
 ## Next Steps
 Next steps:
-  1) add pre-trained embeddings (GloVe and ELmo)
-  2) Create encoder-decoder network for extractive summarizatiotn
+  1) add elMo embeddings
+  2) Create encoder-decoder network for extractive summarization
   3) Share parameters
+  4) Save metrics after each epoch
+  5) Include figure of model structure to readme
+  6) Write in ACL format
   
 ## Installation  
 Python 3.6 is required and the dependences can be installed with:
