@@ -9,9 +9,8 @@ Next steps:
   1) add elMo embeddings
   2) Create encoder-decoder network for extractive summarization
   3) Share parameters
-  4) Save metrics after each epoch
-  5) Include figure of model structure to readme
-  6) Write in ACL format
+  4) Include figure of model structure to readme
+  5) Write in ACL format
   
 ## Installation  
 Python 3.6 is required and the dependences can be installed with:
