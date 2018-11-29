@@ -4,7 +4,7 @@ This is a work-in-progress text classification architecture that jointly learns 
 
 The model is currently a GRU with hierarchical attention using pre-trained gloVe embeddings. Epochs are about 60 seconds on an NVidia Titan X.
 
-## Model formula
+#### Model formula
 
 ![](https://raw.githubusercontent.com/JohnMBrandt/text-classification/master/model-formula.png)
 
