@@ -1,8 +1,6 @@
 ### Overview
 
-This is a work-in-progress text classification architecture that jointly learns to classify sentences and documents by multi-task training with an extractive summarizer.
-
-The model is currently a GRU with hierarchical attention using pre-trained gloVe embeddings. Epochs are about 60 seconds on an NVidia Titan X.
+This architecture reconstructs the multilabel classification of sentences by leveraging context-specific information construed from their source documents. We hypothesize that jointly learning extractive summarization will improve the performance of sentence classification by concatenating sentence information (classification hidden layers) with source document and context information (summarization hidden layers). This parallels the natural decision making process undertaken by human classification, where a combination of semantics and context inform classification. 
 
 #### Model formula
 
@@ -22,8 +20,6 @@ python main.py --epochs {} --training_size {} --batch_size {}
 
 ### Data
 Training data is sourced from [Resource Watch](https://www.climatewatchdata.org/), a research project from the World Resources Institute. Sentence relevance to 17 separate classes were hand-coded for 155 environmental policies (~4,000 pages) by a team of domain experts. 8,922 of the ~50,000 sentences were classified as relevant. 
-
-This architecture reconstructs the multilabel classification of sentences by leveraging context-specific information construed from their source documents. We hypothesize that jointly learning extractive summarization will improve the performance of sentence classification by concatenating sentence information (classification hidden layers) with source document and context information (summarization hidden layers). This parallels the natural decision making process undertaken by human classification, where a combination of semantics and context inform classification. 
 
 #### Steps
 
