@@ -4,26 +4,29 @@ from keras.utils import to_categorical, Sequence
 from keras.models import Sequential
 from keras.metrics import top_k_categorical_accuracy
 from tensorflow import confusion_matrix
+from keras import regularizers
 import tensorflow as tf
-from keras.layers import Embedding, Dense, LSTM, TimeDistributed, Flatten, Activation, Bidirectional, Dropout, BatchNormalization
+from keras.layers import Embedding, Dense, LSTM, TimeDistributed, Flatten, Activation, Bidirectional, Dropout, BatchNormalization, GRU
 import math
 import os
 import numpy as np
 import generator
 import model
 from random import choices
+from keras.callbacks import CSVLogger
 
-def split_train(training_samples, validation_samples, test_samples):
+def split_train(training_samples, validation_samples, test_samples, shuffle = True, x = None, y = None):
     'Split data into train, val, and test splits'
-    data = generator.load_obj("labels_dictionary")
-    x = list(data.keys())
-    y = list(data.values())
-    indices = np.arange(len(x))
-    np.random.shuffle(indices)
-    x = np.array(x)[indices]
-    y = np.array(y)[indices]
+    if x == None:
+        data = generator.load_obj("labels_dictionary")
+        x = list(data.keys())
+        y = list(data.values())
+    if shuffle == True:
+        indices = np.arange(len(x))
+        np.random.shuffle(indices)
+        x = np.array(x)[indices]
+        y = np.array(y)[indices]
     train_x = x[ : training_samples]
-    print(train_x)
     train_y = y[ : training_samples]
     validation_x = x[training_samples : training_samples + validation_samples]
     validation_y = y[training_samples : training_samples + validation_samples]
@@ -97,14 +100,13 @@ def load_embeddings(embed_dir, name, base_dir, max_words,
 
 def make_model(embedding_matrix, n_classes):
     'Create keras model object for bidirectional LSTM with attetntion'
+    l2_reg = regularizers.l2(1e-8)
     classifier = Sequential()
     classifier.add(Embedding(max_words, dimension, input_length = max_len))
-    classifier.add(Bidirectional(LSTM(50, return_sequences = True, dropout = 0.6, recurrent_dropout = 0.6)))
-    classifier.add(BatchNormalization())
-    classifier.add(TimeDistributed(Dense(50)))
+    classifier.add(Bidirectional(GRU(50, return_sequences = True, dropout = 0.3, recurrent_dropout = 0.3, kernel_regularizer = l2_reg)))
+    classifier.add(TimeDistributed(Dense(100, kernel_regularizer = l2_reg)))
     classifier.add(model.AttentionWithContext())
     classifier.add(Dense(n_classes, activation = "sigmoid"))
-
     classifier.layers[0].set_weights([embedding_matrix])
     classifier.layers[0].trainable = False
     classifier.summary()
@@ -119,7 +121,6 @@ def top_1_accuracy(y_true, y_pred):
 def main():
 	print('\n### Loading parameter definitions ###')
 	print('Batch size: {} \nEpochs: {} \n'.format(batch_size, epochs))
-
 	train_x, train_y, validation_x, validation_y, test_x, test_y = split_train(training_samples, validation_samples, test_samples)
 	print('Training samples: {}\nValidation samples: {}\n Test samples: {}\n'.format(len(train_x), len(validation_x), len(test_x)))
 	
@@ -133,7 +134,6 @@ def main():
 		print('Training class ' + str(i) + ": {}".format(class_freq[i - 1]) + "      " + 
 			'   Validation ' + str(i) + ": {}".format(list(validation_y).count(str(i))))
 	print("\n")
-
 	print('### Augmenting under-represented classes with bootstrapped data ###')
 	augmented_x, augmented_y = add_augmented(train_x, train_y, thresh)
 	train_x = np.append(train_x, augmented_x)
@@ -143,7 +143,6 @@ def main():
 	all_y_train = [item for sublist in train_y for item in set(sublist)]
 	for i in range(1, n_classes + 1):
 		class_freq.append(all_y_train.count(str(i)))
-
 	print("\n")
 	for i in range(1, n_classes + 1):
 		print('Training class ' + str(i) + ": {}".format(class_freq[i - 1]) + "      " + 
@@ -154,11 +153,9 @@ def main():
 	training_generator = generator.DataGenerator(train_x, train_y,
 		batch_size = batch_size, n_classes = n_classes,
 		 max_words = max_words, max_len = max_len, base_dir = base_dir)
-
 	validation_generator = generator.DataGenerator(validation_x, validation_y,
 		batch_size = batch_size, n_classes = n_classes,
 		 max_words = max_words, max_len = max_len, base_dir = base_dir)
-
 	test_generator = generator.DataGenerator(test_x, test_y, batch_size = batch_size,
 		n_classes = n_classes, max_words = max_words, max_len = max_len, base_dir = base_dir)
 
@@ -167,7 +164,6 @@ def main():
 
 	classifier = make_model(embedding_matrix = embedding_matrix, n_classes = n_classes)
 	print('\n### Compiling model with binary crossentropy loss and rmsprop optimizer ###')
-
 	classifier.compile(loss = "binary_crossentropy",
 		optimizer = "adam",
 		metrics = [top_3_accuracy, top_1_accuracy])
@@ -177,26 +173,18 @@ def main():
 		count = all_y_train.count(str(i + 1))
 		class_weights.update({i : round(1/count, 4)*1000})
 
+	csv_logger = CSVLogger("log.csv", append = False, separator = ",")
 	print("Class weights: {}".format(class_weights))
 	classifier.fit_generator(generator = training_generator,
                    validation_data = validation_generator, epochs = epochs,
-                   class_weight = class_weights)
+                   class_weight = class_weights, callbacks = [csv_logger])
 
 	probabilities = classifier.predict_generator(generator = test_generator)
 	generator.save_obj(probabilities, "pred_y")
 	generator.save_obj(test_y, "true_y")
-	#test_y = [int(x) for x in test_y]
-	#test_classes = probabilities.argmax(axis = -1) + 1
-	#matrix = confusion_matrix(test_classes, test_y)
-	#sess = tf.Session()
-	#with sess.as_default():
-	#	print(sess.run(matrix))
+
 	print("\n### Saving model weights to simple_lstm.h5 ###")
 	classifier.save_weights("simple_lstm.h5")
-
-############################
-###     Run if main      ###
-############################
 
 if __name__ == "__main__":
 	import argparse

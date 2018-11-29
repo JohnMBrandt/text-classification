@@ -82,3 +82,37 @@ class AttentionWithContext(Layer):
 
     def compute_output_shape(self, input_shape):
         return input_shape[0], input_shape[-1]
+
+
+class Attention(Layer):
+    'Attention layer constructed from the Hierarchical Attention Network (2015) paper'
+    def __init__(self, regularizer=None, **kwargs):
+        super(Attention, self).__init__(**kwargs)
+        self.regularizer = regularizer
+        self.supports_masking = True
+
+    def build(self, input_shape):
+        # Create a trainable weight variable for this layer.
+        self.context = self.add_weight(name='context', 
+                                       shape=(input_shape[-1], 1),
+                                       initializer=initializers.RandomNormal(
+                                            mean=0.0, stddev=0.05, seed=None),
+                                       regularizer=self.regularizer,
+                                       trainable=True)
+        super(Attention, self).build(input_shape)
+
+    def call(self, x, mask=None):
+        attention_in = K.exp(K.squeeze(K.dot(x, self.context), axis=-1))
+        attention = attention_in/K.expand_dims(K.sum(attention_in, axis=-1), -1)
+
+        if mask is not None:
+            # use only the inputs specified by the mask
+            # import pdb; pdb.set_trace()
+            attention = attention*K.cast(mask, 'float32')
+
+        weighted_sum = K.batch_dot(K.permute_dimensions(x, [0, 2, 1]), attention)
+        return weighted_sum
+
+    def compute_output_shape(self, input_shape):
+        print(input_shape)
+        return (input_shape[0], input_shape[-1])

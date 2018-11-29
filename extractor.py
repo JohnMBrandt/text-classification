@@ -15,25 +15,10 @@ from keras import backend as K
 from keras.utils import CustomObjectScope
 from keras.engine.topology import Layer
 from keras import initializers
+from main import split_train
+from model import Attention
 
 base_dir = os.getcwd()
-
-def split_train(training_samples, validation_samples, test_samples):
-    'Split data into train, val, and test splits'
-    x = seq_x
-    y = binary_y
-    #indices = np.arange(len(x))
-    #np.random.shuffle(indices)
-    #x = np.array(x)[indices]
-    #y = np.array(y)[indices]
-    train_x = x[ : training_samples]
-    train_y = y[ : training_samples]
-    validation_x = x[training_samples : training_samples + validation_samples]
-    validation_y = y[training_samples : training_samples + validation_samples]
-    test_x = x[training_samples + validation_samples : training_samples + validation_samples + test_samples]
-    test_y = y[training_samples + validation_samples : training_samples + validation_samples + test_samples]
-    return(train_x, train_y, validation_x, validation_y, test_x, test_y)
-
 dir_x = os.path.join(base_dir, "ndc-extraction", "x")
 dir_y = os.path.join(base_dir, "ndc-extraction", "y")
 ls_x = os.listdir(dir_x)
@@ -44,6 +29,12 @@ ls_y = [x for x in ls_y if ".txt" in x]
 
 data_x = []
 data_y = []
+
+def to_one_hot(labels, dim=2):
+    results = np.zeros((len(labels), dim))
+    for i, label in enumerate(labels):
+        results[i][label - 1] = 1
+    return results
 
 for file in ls_x:
     f = open(os.path.join(dir_x, file))
@@ -70,13 +61,6 @@ for i in data_x:
     temp = (tokenizer.texts_to_sequences(i))
     temp = pad_sequences(temp, 15)
     seq_x.append(temp)
-
-
-def to_one_hot(labels, dim=2):
-    results = np.zeros((len(labels), dim))
-    for i, label in enumerate(labels):
-        results[i][label - 1] = 1
-    return results
     
 binary_y = []
 for i in data_y:
@@ -86,41 +70,15 @@ for i in data_y:
     temp = to_one_hot(temp)
     binary_y.append(temp)
 
-train_x, train_y, validation_x, validation_y, test_x, test_y = split_train(50, 20, 50)
-
-class Attention(Layer):
-    def __init__(self, regularizer=None, **kwargs):
-        super(Attention, self).__init__(**kwargs)
-        self.regularizer = regularizer
-        self.supports_masking = True
-
-    def build(self, input_shape):
-        # Create a trainable weight variable for this layer.
-        self.context = self.add_weight(name='context', 
-                                       shape=(input_shape[-1], 1),
-                                       initializer=initializers.RandomNormal(
-                                            mean=0.0, stddev=0.05, seed=None),
-                                       regularizer=self.regularizer,
-                                       trainable=True)
-        super(Attention, self).build(input_shape)
-
-    def call(self, x, mask=None):
-        attention_in = K.exp(K.squeeze(K.dot(x, self.context), axis=-1))
-        attention = attention_in/K.expand_dims(K.sum(attention_in, axis=-1), -1)
-
-        if mask is not None:
-            # use only the inputs specified by the mask
-            # import pdb; pdb.set_trace()
-            attention = attention*K.cast(mask, 'float32')
-
-        weighted_sum = K.batch_dot(K.permute_dimensions(x, [0, 2, 1]), attention)
-        return weighted_sum
-
-    def compute_output_shape(self, input_shape):
-        print(input_shape)
-        return (input_shape[0], input_shape[-1])
+train_x, train_y, validation_x, validation_y, test_x, test_y = split_train(training_samples = 50,
+                                                                            validation_samples = 20,
+                                                                            test_samples = 50,
+                                                                            shuffle = False,
+                                                                            x = seq_x,
+                                                                            y = binary_y)
 
 class HierarchicalAttn():
+    'Constructs a model with attention over words and Bidirectional GRU over sentences to encode sentences'
     def __init__(self, model, max_len, max_sentence, vocab_size, word_embedding):
         self.model = None
         self.max_len = 15
@@ -151,6 +109,7 @@ class HierarchicalAttn():
         return(model)
     
     def encode_texts(self, texts):
+        'Reformat X data to be 3 dimensional array (docs, sentences, words)'
         encoded_texts = np.zeros((len(texts), self.max_sentence, self.max_len))
         for i, text in enumerate(texts):
             encoded_text = np.array(text)[:self.max_sentence]
@@ -158,6 +117,7 @@ class HierarchicalAttn():
         return(encoded_texts)
 
     def encode_y(self, y):
+        'Reformat Y data to be 3 dimensional array (docs, sentences, class)'
         encoded_ys = np.zeros((len(y), self.max_sentence, 2))
         for i, text in enumerate(y):
             encoded_y = np.array(text)[:self.max_sentence]
@@ -165,17 +125,22 @@ class HierarchicalAttn():
         return(encoded_ys)
     
     def train(self, train_x, train_y):
+        'Encode x, y data and fit model'
         encoded_train_x = self.encode_texts(train_x)
         encoded_test_x = self.encode_texts(test_x)
         encoded_test_y = self.encode_y(test_y)
         encoded_train_y = self.encode_y(train_y)
-        print(encoded_test_y[1])
-        print(encoded_test_x.shape)
-            #class_weights = {0: 1, 1: 20}
+        
         self.model = self.build_model()
         self.model.fit(encoded_train_x, encoded_train_y, epochs = 2, validation_split = 0.1, batch_size = 10)
         preds = self.model.predict(encoded_test_x)
         print(preds)
+        #test_y = [int(x) for x in test_y]
+        #test_classes = probabilities.argmax(axis = -1) + 1
+        #matrix = confusion_matrix(test_classes, test_y)
+        #sess = tf.Session()
+        #with sess.as_default():
+        #   print(sess.run(matrix))
 
 h = HierarchicalAttn(None, 15, 500, 10000, 300)
 
