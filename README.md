@@ -33,6 +33,5 @@ Data is structured in a 3-dimensional array of the form (docs, sentences, words)
 Under-represented data classes are augmented with psuedo-random bootstrapping such that the range of class distribution falls within a tunable parameter. A bidirectional GRU and attention with context clayer are used to classify each sentence, with a l2 regularization and recurrent dropout of 0.3. Model fit is measured using top k accuracy on a 20% validation split.
 
 ![](https://raw.githubusercontent.com/JohnMBrandt/text-classification/master/img/top_3_acc.png){:width="50%"}
-
-  
+<img src="https://raw.githubusercontent.com/JohnMBrandt/text-classification/master/img/top_3_acc.png" width="50%">
 
