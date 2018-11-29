@@ -6,7 +6,7 @@ The model is currently a GRU with hierarchical attention using pre-trained gloVe
 
 ## Model formula
 
-[](https://raw.githubusercontent.com/JohnMBrandt/text-classification/master/model-formula.png)
+![](https://raw.githubusercontent.com/JohnMBrandt/text-classification/master/model-formula.png)
 
 ## Next Steps
 Next steps:
