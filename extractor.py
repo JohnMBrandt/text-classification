@@ -17,10 +17,13 @@ from keras.engine.topology import Layer
 from keras import initializers
 from main import split_train
 from model import Attention
+import pickle
+from generator import save_obj
 
 base_dir = os.getcwd()
 dir_x = os.path.join(base_dir, "ndc-extraction", "x")
 dir_y = os.path.join(base_dir, "ndc-extraction", "y")
+glove_dir = os.path.join(base_dir, "glove-embeddings")
 ls_x = os.listdir(dir_x)
 ls_y = os.listdir(dir_y)
 
@@ -30,7 +33,6 @@ ls_y = [x for x in ls_y if ".txt" in x]
 data_x = []
 data_y = []
 
-glove_dir = os.path.join(base_dir, "glove-embeddings")
 
 def to_one_hot(labels, dim=2):
     results = np.zeros((len(labels), dim))
@@ -38,7 +40,9 @@ def to_one_hot(labels, dim=2):
         results[i][label - 1] = 1
     return results
 
+
 def load_embeddings(glove_dir, word_index, max_words, embedding_dim):
+    print('### Loading {} dimensional GloVe embeddings for top {} words ###'.format(embedding_dim, max_words))
     embeddings_index = {}
     f = open(os.path.join(glove_dir, 'glove.6B.300d.txt'))
     for line in f:
@@ -57,6 +61,7 @@ def load_embeddings(glove_dir, word_index, max_words, embedding_dim):
                 embedding_matrix[i] = embedding_vector
     return(embedding_matrix)
 
+print("\n### Loading data ###")
 for file in ls_x:
     f = open(os.path.join(dir_x, file))
     temp = []
@@ -73,6 +78,7 @@ for file in ls_y:
     f.close()
     data_y.append(temp)
 
+print("### Generating tokenizer ###")
 tokenizer = Tokenizer(num_words = 10000)
 tokenizer.fit_on_texts(data_x)
 word_index = tokenizer.word_index
@@ -93,7 +99,7 @@ for i in data_y:
     #temp = to_one_hot(temp)
     binary_y.append(temp)
 
-train_x, train_y, validation_x, validation_y, test_x, test_y = split_train(training_samples = 450,
+train_x, train_y, validation_x, validation_y, test_x, test_y = split_train(training_samples = 300,
                                                                             validation_samples = 1,
                                                                             test_samples = 50,
                                                                             shuffle = False,
@@ -112,6 +118,8 @@ class HierarchicalAttn():
         self.embedding_weights = embedding_weights
 
     def weight_samples(self, train_y):
+        'Weight binary classes based on their relative frequency'
+        print("### Weighting samples ###")
         samp_wt = np.zeros((len(train_y), self.max_sentence))
         for x, labs in enumerate(train_y):
             indiv_wt = np.zeros(self.max_sentence)
@@ -124,7 +132,7 @@ class HierarchicalAttn():
         return(samp_wt)
         
     def build_model(self, n_classes = 1, embedding_dim = 300):
-        #embedding_weights = np.random.normal(0, 1, (10000, embedding_dim))
+        'Build bi-level bi-directional GRU model with attention over word embeddings'
         l2_reg = regularizers.l2(1e-8)
         sentence_in = Input(shape = (self.max_len,), dtype = "int32")
         embedded_word_seq = Embedding(10000, 300, input_length = self.max_len, trainable = False, weights = [self.embedding_weights])(sentence_in)
@@ -135,13 +143,9 @@ class HierarchicalAttn():
         
         texts_in = Input(shape=(self.max_sentence, self.max_len), dtype='int32')
         attention_weighted_sentences = TimeDistributed(attn_weighted_sent)(texts_in)
-        sentence_encoder = Bidirectional(GRU(50, return_sequences=True, kernel_regularizer=l2_reg))(attention_weighted_sentences)
+        sentence_encoder = Bidirectional(GRU(50, return_sequences=True, kernel_regularizer=l2_reg), name = "sentence_encoder")(attention_weighted_sentences)
         dense_transform_s = TimeDistributed(Dense(100, activation='relu', name='dense_transform_s',kernel_regularizer=l2_reg))(sentence_encoder) 
-        #attention_weighted_text = TimeDistributed(Attention(name='sentence_attention', regularizer=l2_reg)(dense_transform_s))
-        #flatten = TimeDistributed(Flatten())(sentence_encoder)
         prediction = TimeDistributed(Dense(1, activation = "sigmoid"))(dense_transform_s)
-        #flatten = Flatten()(prediction)
-        #pred_2 = TimeDistributed(Dense(1, activation = "sigmoid"))(flatten)
         model = Model(texts_in, prediction)
         model.summary()
         model.compile(optimizer = Adam(lr = 0.001), loss = "binary_crossentropy", metrics = ["acc"], sample_weight_mode = "temporal")
@@ -170,22 +174,21 @@ class HierarchicalAttn():
         encoded_test_x = self.encode_texts(test_x)
         encoded_test_y = self.encode_y(test_y)
         encoded_train_y = self.encode_y(train_y)
+        encoded_all = self.encode_texts(seq_x)
         sample_weights = self.weight_samples(train_y)
-        print(train_y[1])
         
         self.model = self.build_model()
-        self.model.fit(encoded_train_x, encoded_train_y, epochs = 50, validation_split = 0.1, batch_size = 10,
+        self.model.fit(encoded_train_x, encoded_train_y, epochs = 10, validation_split = 0.1, batch_size = 10,
                         sample_weight = sample_weights)
         preds = self.model.predict(encoded_test_x)
-        print(preds)
-        #test_y = [int(x) for x in test_y]
-        #test_classes = probabilities.argmax(axis = -1) + 1
-        #matrix = confusion_matrix(test_classes, test_y)
-        #sess = tf.Session()
-        #with sess.as_default():
-        #   print(sess.run(matrix))
 
+        # Extract second LSTM output for the sentence representation to be transfered to sentence classifier
+        intermediate_layer_model = Model(inputs=self.model.input,
+                                         outputs=self.model.get_layer("sentence_encoder").output)
+        intermediate_output = intermediate_layer_model.predict(encoded_all)
+        save_obj(intermediate_output, "sentence_encoding")
+        save_obj(preds, "sentence_extraction")
 
-h = HierarchicalAttn(None, 30, 500, 10000, 300, embedding_weights)
-
-h.train(train_x, train_y)
+if __name__ == "__main__":
+    h = HierarchicalAttn(None, 30, 500, 10000, 300, embedding_weights)
+    h.train(train_x, train_y)

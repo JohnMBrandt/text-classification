@@ -41,11 +41,12 @@ def clean_str(string):
         return string.strip().lower()
 
 class DataGenerator(Sequence):
-    def __init__(self, files, labels, batch_size = 32, 
+    def __init__(self, files, encoded, labels, batch_size = 32, 
         n_classes = 17, max_words = 10000, max_len = 50, base_dir = os.getcwd()):
 
         self.batch_size = batch_size
         self.labels = labels
+        self.encoded = encoded
         self.files = files
         self.n_classes = n_classes
         self.max_words = max_words
@@ -99,7 +100,9 @@ class DataGenerator(Sequence):
         
     def __data_generation(self, files_temp):
         x = []
+        x_interim = []
         y = np.empty(17)
+
         for ID in files_temp:
             file = open(os.path.join(self.base_dir, "ndc-data", str(ID) + ".txt"), encoding = "ISO-8859-1")
             cleaned = clean_str(file.read())
@@ -108,7 +111,12 @@ class DataGenerator(Sequence):
             file.close()
             y = np.vstack([y, [self.multihot(y_temp)]])
         y = y[1:]
+        for ID in files_temp:
+            file = np.loadtxt(os.path.join(self.base_dir, "ndc-encoded", str(ID) + ".txt"))
+            x_interim.append(file)
+
 
         sequences = self.tokenizer.texts_to_sequences(x)
         x = pad_sequences(sequences, maxlen = self.max_len)
+        x = [np.array(x), np.array(x_interim)]
         return x, y

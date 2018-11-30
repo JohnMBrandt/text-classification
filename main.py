@@ -1,17 +1,17 @@
 from keras.preprocessing.text import Tokenizer
 from keras.preprocessing.sequence import pad_sequences
 from keras.utils import to_categorical, Sequence
-from keras.models import Sequential
+from keras.models import Sequential, Model
 from keras.metrics import top_k_categorical_accuracy
 from tensorflow import confusion_matrix
 from keras import regularizers
 import tensorflow as tf
-from keras.layers import Embedding, Dense, LSTM, TimeDistributed, Flatten, Activation, Bidirectional, Dropout, BatchNormalization, GRU
+from keras.layers import Input, concatenate, Embedding, Dense, LSTM, TimeDistributed, Flatten, Activation, Bidirectional, Dropout, BatchNormalization, GRU
 import math
 import os
 import numpy as np
 import generator
-import model
+from model import AttentionWithContext
 from random import choices
 from keras.callbacks import CSVLogger
 
@@ -98,6 +98,7 @@ def load_embeddings(embed_dir, name, base_dir, max_words,
 	generator.save_obj(embedding_matrix, "embedding_matrix") 
 	return(embedding_matrix)
 
+'''
 def make_model(embedding_matrix, n_classes):
     'Create keras model object for bidirectional LSTM with attetntion'
     l2_reg = regularizers.l2(1e-8)
@@ -110,7 +111,23 @@ def make_model(embedding_matrix, n_classes):
     classifier.layers[0].set_weights([embedding_matrix])
     classifier.layers[0].trainable = False
     classifier.summary()
-    return(classifier)
+    return(classifier)'''
+
+def make_model(embedding_matrix, n_classes):
+	'Create model'
+	l2_reg = regularizers.l2(1e-8)
+	word_input = Input(shape = (max_len,), dtype = "int32")
+	encoded_input = Input(shape = (100,), dtype = "float32")
+	embedded_words = Embedding(10000, 300, input_length = max_len, trainable = False, weights = [embedding_matrix])(word_input)
+	rnn = Bidirectional(GRU(50, return_sequences = True, dropout = 0.3, recurrent_dropout = 0.3, kernel_regularizer = l2_reg))(embedded_words)
+	dense_w = TimeDistributed(Dense(100, kernel_regularizer = l2_reg))(rnn)
+	attn = AttentionWithContext()(dense_w)
+
+	merge_layer = concatenate([attn, encoded_input])
+	output = Dense(n_classes, activation = "sigmoid")(merge_layer)
+	model = Model(inputs = [word_input, encoded_input], outputs = [output])
+	model.summary()
+	return(model)
 
 def top_3_accuracy(y_true, y_pred):
 	return top_k_categorical_accuracy(y_true, y_pred, k=3)
@@ -150,13 +167,13 @@ def main():
 	print("\n")
 
 	print('\n### Creating generator and tokenizer ###')
-	training_generator = generator.DataGenerator(train_x, train_y,
+	training_generator = generator.DataGenerator(train_x, train_x, train_y,
 		batch_size = batch_size, n_classes = n_classes,
 		 max_words = max_words, max_len = max_len, base_dir = base_dir)
-	validation_generator = generator.DataGenerator(validation_x, validation_y,
+	validation_generator = generator.DataGenerator(validation_x, validation_x, validation_y,
 		batch_size = batch_size, n_classes = n_classes,
 		 max_words = max_words, max_len = max_len, base_dir = base_dir)
-	test_generator = generator.DataGenerator(test_x, test_y, batch_size = batch_size,
+	test_generator = generator.DataGenerator(test_x, test_x, test_y, batch_size = batch_size,
 		n_classes = n_classes, max_words = max_words, max_len = max_len, base_dir = base_dir)
 
 	embedding_matrix = load_embeddings(base_dir = base_dir, embed_dir = "glove-embeddings",
