@@ -23,8 +23,11 @@ def split_train(training_samples, validation_samples, test_samples, shuffle = Tr
         x = list(data.keys())
         y = list(data.values())
     if shuffle == True:
-        indices = np.arange(len(x))
-        np.random.shuffle(indices)
+        # The "indices" file ensures that the training sentences come from the training documents
+        # and the testing sentences come from the testing documents
+        indices = generator.load_obj("classifier/indices")
+        #indices = np.arange(len(x))
+        #np.random.shuffle(indices)
         x = np.array(x)[indices]
         y = np.array(y)[indices]
     train_x = x[ : training_samples]
@@ -121,17 +124,7 @@ def top_3_accuracy(y_true, y_pred):
 def top_1_accuracy(y_true, y_pred):
 	return top_k_categorical_accuracy(y_true, y_pred, k=1)
 
-def augment_data(train_x, train_y, validation_x, validation_y, thresh):
-	class_freq = []
-	all_y_train = [item for sublist in train_y for item in set(sublist)]
-	for i in range(1, n_classes + 1):
-		class_freq.append(all_y_train.count(str(i)))
-
-	print("Sum of class freq {}".format(sum(class_freq)))
-	for i in range(1, n_classes + 1):
-		print('Training class ' + str(i) + ": {}".format(class_freq[i - 1]) + "      " + 
-			'   Validation ' + str(i) + ": {}".format(list(validation_y).count(str(i))))
-	print("\n")
+def augment_and_weight_data(train_x, train_y, validation_x, validation_y, thresh, n_classes):
 	print('### Augmenting under-represented classes with bootstrapped data ###')
 	augmented_x, augmented_y = add_augmented(train_x, train_y, thresh)
 	train_x = np.append(train_x, augmented_x)
@@ -146,16 +139,21 @@ def augment_data(train_x, train_y, validation_x, validation_y, thresh):
 		print('Training class ' + str(i) + ": {}".format(class_freq[i - 1]) + "      " + 
 			'   Validation ' + str(i) + ": {}".format(list(validation_y).count(str(i))))
 	print("\n")
-	return(train_x, train_y)
+	class_weights = {}
+	for i in range(0, n_classes):
+		count = all_y_train.count(str(i + 1))
+		class_weights.update({i : round(1/count, 4)*1000})
+	return(train_x, train_y, class_weights)
 
 def main():
     print("\n### Pre-training sentence extractor ###")
     dir_x = os.path.join(base_dir, "ndc-extraction", "x")
     dir_y = os.path.join(base_dir, "ndc-extraction", "y")
     extr_x, extr_y, tokenizer = load_data(dir_x, dir_y)
-    ex_train_x, ex_train_y, ex_validation_x, ex_validation_y, ex_test_x, ex_test_y = split_train(training_samples = 440,
+    # Training on 335 samples will include up to "65-6.txt" and will include the first 5,035 sentences
+    ex_train_x, ex_train_y, ex_validation_x, ex_validation_y, ex_test_x, ex_test_y = split_train(training_samples = 335,
                                                                             validation_samples = 0,
-                                                                            test_samples = 10,
+                                                                            test_samples = 115,
                                                                             shuffle = False,
                                                                             x = extr_x,
                                                                             y = extr_y)
@@ -172,7 +170,7 @@ def main():
     print('Batch size: {} \nEpochs: {} \n'.format(batch_size, epochs))
     train_x, train_y, validation_x, validation_y, test_x, test_y = split_train(training_samples, validation_samples, test_samples)
     print('Training samples: {}\nValidation samples: {}\n Test samples: {}\n'.format(len(train_x), len(validation_x), len(test_x)))
-    train_x, train_y = augment_data(train_x, train_y, validation_x, validation_y, thresh)
+    train_x, train_y, class_weights = augment_and_weight_data(train_x, train_y, validation_x, validation_y, thresh, n_classes = n_classes)
 
     print('\n### Creating generator and tokenizer ###')
     training_generator = generator.DataGenerator(train_x, train_x, train_y,
@@ -185,18 +183,13 @@ def main():
         n_classes = n_classes, max_words = max_words, max_len = max_len, base_dir = base_dir)
 
     embedding_matrix = load_embeddings(base_dir = base_dir, embed_dir = "glove-embeddings",
-        max_words = max_words, name = "glove.6B.300d.txt")
+        max_words = max_words)
 
     classifier = make_model(embedding_matrix = embedding_matrix, n_classes = n_classes)
     print('\n### Compiling model with binary crossentropy loss and rmsprop optimizer ###')
     classifier.compile(loss = "binary_crossentropy",
         optimizer = "adam",
         metrics = [top_3_accuracy, top_1_accuracy])
-
-    class_weights = {}
-    for i in range(0, n_classes):
-        count = all_y_train.count(str(i + 1))
-        class_weights.update({i : round(1/count, 4)*1000})
 
     csv_logger = CSVLogger("log.csv", append = False, separator = ",")
     print("Class weights: {}".format(class_weights))
@@ -218,10 +211,10 @@ if __name__ == "__main__":
 	parser.add_argument('--dimension', default = 300, type = int)
 	parser.add_argument('--epochs', default = 3, type = int)
 	parser.add_argument('--batch_size', default = 100, type = int)
-	parser.add_argument('--training_samples', default = 4000, type = int)
+	parser.add_argument('--training_samples', default = 5032, type = int)
 	parser.add_argument('--n_classes', default = 17, type = int)
-	parser.add_argument('--validation_samples', default = 1500, type = int)
-	parser.add_argument('--test_samples', default = 2000, type = int)
+	parser.add_argument('--validation_samples', default = 900, type = int)
+	parser.add_argument('--test_samples', default = 800, type = int)
 	parser.add_argument('--max_len', default = 50, type = int)
 	parser.add_argument('--max_words', default = 10000, type = int)
 	parser.add_argument('--thresh', default = 0.75, type = int)

@@ -20,7 +20,7 @@ import pickle
 from generator import save_obj
 
 def encode_sentences(base_dir, weights):
-    dir_y = os.listdir(os.path.join(base_dir, "ndc-extraction", "y"))
+    dir_y = sorted(os.listdir(os.path.join(base_dir, "ndc-extraction", "y")))
     dir_y = [x for x in dir_y if ".txt" in x]
     file = os.path.join(base_dir, "obj/merge/sdg_indexes.txt")
     class_data = []
@@ -43,8 +43,12 @@ def encode_sentences(base_dir, weights):
 
 def load_data(dir_x, dir_y):
     base_dir = os.getcwd()
-    ls_x = [x for x in os.listdir(dir_x) if ".txt" in x]
-    ls_y = [x for x in os.listdir(dir_y) if ".txt" in x]
+    ls_x = [x for x in sorted(os.listdir(dir_x)) if ".txt" in x]
+    ls_y = [x for x in sorted(os.listdir(dir_y)) if ".txt" in x]
+    if ls_x == ls_y:
+        print("X and Y data match")
+    else:
+        print("ERROR - X and Y data are mismatched")
     data_x = []
     data_y = []
 
