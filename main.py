@@ -14,6 +14,7 @@ import generator
 from model import AttentionWithContext
 from random import choices
 from keras.callbacks import CSVLogger
+from extractor import encode_sentences, load_data, HierarchicalAttn
 
 def split_train(training_samples, validation_samples, test_samples, shuffle = True, x = None, y = None):
     'Split data into train, val, and test splits'
@@ -73,13 +74,14 @@ def add_augmented(train_x, train_y, thresh):
 	augmented_x = [item for sublist in augmented_x for item in sublist]
 	return(augmented_x, augmented_y)
 	
-def load_embeddings(embed_dir, name, base_dir, max_words,
-					word_index = "word_index", embedding_dim = 300):
+def load_embeddings(embed_dir, base_dir, max_words,
+					word_index = None, embedding_dim = 300):
 	'Calculate pre-trained gloVe embeddings for datat'
-	print("\n### Calculating pre-trained gloVe embeddings ###")
-	word_index = generator.load_obj(word_index)
+	print('### Loading {} dimensional GloVe embeddings for top {} words ###'.format(embedding_dim, max_words))
+	if word_index is None:
+		word_index = generator.load_obj("word_index")
 	embeddings_index = {}
-	f = open(os.path.join(base_dir, embed_dir, name))
+	f = open(os.path.join(base_dir, embed_dir, 'glove.6B.300d.txt'))
 	for line in f:
 		values = line.split()
 		word = values[0]
@@ -94,24 +96,7 @@ def load_embeddings(embed_dir, name, base_dir, max_words,
 			embedding_vector = embeddings_index.get(word)
 			if embedding_vector is not None:
 				embedding_matrix[i] = embedding_vector
-	print("Saving glove embedding matrix\n")
-	generator.save_obj(embedding_matrix, "embedding_matrix") 
 	return(embedding_matrix)
-
-'''
-def make_model(embedding_matrix, n_classes):
-    'Create keras model object for bidirectional LSTM with attetntion'
-    l2_reg = regularizers.l2(1e-8)
-    classifier = Sequential()
-    classifier.add(Embedding(max_words, dimension, input_length = max_len))
-    classifier.add(Bidirectional(GRU(50, return_sequences = True, dropout = 0.3, recurrent_dropout = 0.3, kernel_regularizer = l2_reg)))
-    classifier.add(TimeDistributed(Dense(100, kernel_regularizer = l2_reg)))
-    classifier.add(model.AttentionWithContext())
-    classifier.add(Dense(n_classes, activation = "sigmoid"))
-    classifier.layers[0].set_weights([embedding_matrix])
-    classifier.layers[0].trainable = False
-    classifier.summary()
-    return(classifier)'''
 
 def make_model(embedding_matrix, n_classes):
 	'Create model'
@@ -124,7 +109,8 @@ def make_model(embedding_matrix, n_classes):
 	attn = AttentionWithContext()(dense_w)
 
 	merge_layer = concatenate([attn, encoded_input])
-	output = Dense(n_classes, activation = "sigmoid")(merge_layer)
+	dense_merged = Dense(100, activation = "relu", kernel_regularizer = l2_reg)(merge_layer)
+	output = Dense(n_classes, activation = "sigmoid")(dense_merged)
 	model = Model(inputs = [word_input, encoded_input], outputs = [output])
 	model.summary()
 	return(model)
@@ -135,12 +121,7 @@ def top_3_accuracy(y_true, y_pred):
 def top_1_accuracy(y_true, y_pred):
 	return top_k_categorical_accuracy(y_true, y_pred, k=1)
 
-def main():
-	print('\n### Loading parameter definitions ###')
-	print('Batch size: {} \nEpochs: {} \n'.format(batch_size, epochs))
-	train_x, train_y, validation_x, validation_y, test_x, test_y = split_train(training_samples, validation_samples, test_samples)
-	print('Training samples: {}\nValidation samples: {}\n Test samples: {}\n'.format(len(train_x), len(validation_x), len(test_x)))
-	
+def augment_data(train_x, train_y, validation_x, validation_y, thresh):
 	class_freq = []
 	all_y_train = [item for sublist in train_y for item in set(sublist)]
 	for i in range(1, n_classes + 1):
@@ -165,43 +146,70 @@ def main():
 		print('Training class ' + str(i) + ": {}".format(class_freq[i - 1]) + "      " + 
 			'   Validation ' + str(i) + ": {}".format(list(validation_y).count(str(i))))
 	print("\n")
+	return(train_x, train_y)
 
-	print('\n### Creating generator and tokenizer ###')
-	training_generator = generator.DataGenerator(train_x, train_x, train_y,
-		batch_size = batch_size, n_classes = n_classes,
-		 max_words = max_words, max_len = max_len, base_dir = base_dir)
-	validation_generator = generator.DataGenerator(validation_x, validation_x, validation_y,
-		batch_size = batch_size, n_classes = n_classes,
-		 max_words = max_words, max_len = max_len, base_dir = base_dir)
-	test_generator = generator.DataGenerator(test_x, test_x, test_y, batch_size = batch_size,
-		n_classes = n_classes, max_words = max_words, max_len = max_len, base_dir = base_dir)
+def main():
+    print("\n### Pre-training sentence extractor ###")
+    dir_x = os.path.join(base_dir, "ndc-extraction", "x")
+    dir_y = os.path.join(base_dir, "ndc-extraction", "y")
+    extr_x, extr_y, tokenizer = load_data(dir_x, dir_y)
+    ex_train_x, ex_train_y, ex_validation_x, ex_validation_y, ex_test_x, ex_test_y = split_train(training_samples = 440,
+                                                                            validation_samples = 0,
+                                                                            test_samples = 10,
+                                                                            shuffle = False,
+                                                                            x = extr_x,
+                                                                            y = extr_y)
+    extraction_embeddings = load_embeddings(base_dir = base_dir, embed_dir = "glove-embeddings",
+                                        word_index = tokenizer.word_index, max_words = 10000,)
 
-	embedding_matrix = load_embeddings(base_dir = base_dir, embed_dir = "glove-embeddings",
-		max_words = max_words, name = "glove.6B.300d.txt")
+    h = HierarchicalAttn(None, max_len = 30, max_sentence = 100, vocab_size = 10000, base_dir = base_dir,
+                        embedding_weights = extraction_embeddings, train_x = ex_train_x, train_y = ex_train_y, test_x = ex_test_x, test_y = ex_test_y)
+    h.train(ex_train_x, ex_train_y)
 
-	classifier = make_model(embedding_matrix = embedding_matrix, n_classes = n_classes)
-	print('\n### Compiling model with binary crossentropy loss and rmsprop optimizer ###')
-	classifier.compile(loss = "binary_crossentropy",
-		optimizer = "adam",
-		metrics = [top_3_accuracy, top_1_accuracy])
+    print("### Training sentence classifier")
 
-	class_weights = {}
-	for i in range(0, n_classes):
-		count = all_y_train.count(str(i + 1))
-		class_weights.update({i : round(1/count, 4)*1000})
+    print('\n### Loading parameter definitions ###')
+    print('Batch size: {} \nEpochs: {} \n'.format(batch_size, epochs))
+    train_x, train_y, validation_x, validation_y, test_x, test_y = split_train(training_samples, validation_samples, test_samples)
+    print('Training samples: {}\nValidation samples: {}\n Test samples: {}\n'.format(len(train_x), len(validation_x), len(test_x)))
+    train_x, train_y = augment_data(train_x, train_y, validation_x, validation_y, thresh)
 
-	csv_logger = CSVLogger("log.csv", append = False, separator = ",")
-	print("Class weights: {}".format(class_weights))
-	classifier.fit_generator(generator = training_generator,
+    print('\n### Creating generator and tokenizer ###')
+    training_generator = generator.DataGenerator(train_x, train_x, train_y,
+        batch_size = batch_size, n_classes = n_classes,
+        max_words = max_words, max_len = max_len, base_dir = base_dir)
+    validation_generator = generator.DataGenerator(validation_x, validation_x, validation_y,
+        batch_size = batch_size, n_classes = n_classes,
+        max_words = max_words, max_len = max_len, base_dir = base_dir)
+    test_generator = generator.DataGenerator(test_x, test_x, test_y, batch_size = batch_size,
+        n_classes = n_classes, max_words = max_words, max_len = max_len, base_dir = base_dir)
+
+    embedding_matrix = load_embeddings(base_dir = base_dir, embed_dir = "glove-embeddings",
+        max_words = max_words, name = "glove.6B.300d.txt")
+
+    classifier = make_model(embedding_matrix = embedding_matrix, n_classes = n_classes)
+    print('\n### Compiling model with binary crossentropy loss and rmsprop optimizer ###')
+    classifier.compile(loss = "binary_crossentropy",
+        optimizer = "adam",
+        metrics = [top_3_accuracy, top_1_accuracy])
+
+    class_weights = {}
+    for i in range(0, n_classes):
+        count = all_y_train.count(str(i + 1))
+        class_weights.update({i : round(1/count, 4)*1000})
+
+    csv_logger = CSVLogger("log.csv", append = False, separator = ",")
+    print("Class weights: {}".format(class_weights))
+    classifier.fit_generator(generator = training_generator,
                    validation_data = validation_generator, epochs = epochs,
                    class_weight = class_weights, callbacks = [csv_logger])
 
-	probabilities = classifier.predict_generator(generator = test_generator)
-	generator.save_obj(probabilities, "pred_y")
-	generator.save_obj(test_y, "true_y")
+    probabilities = classifier.predict_generator(generator = test_generator)
+    generator.save_obj(probabilities, "pred_y")
+    generator.save_obj(test_y, "true_y")
 
-	print("\n### Saving model weights to simple_lstm.h5 ###")
-	classifier.save_weights("simple_lstm.h5")
+    print("\n### Saving model weights to simple_lstm.h5 ###")
+    classifier.save_weights("simple_lstm.h5")
 
 if __name__ == "__main__":
 	import argparse

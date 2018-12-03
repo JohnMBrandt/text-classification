@@ -15,38 +15,31 @@ from keras import backend as K
 from keras.utils import CustomObjectScope
 from keras.engine.topology import Layer
 from keras import initializers
-from main import split_train
 from model import Attention
 import pickle
 from generator import save_obj
 
-base_dir = os.getcwd()
-dir_x = os.path.join(base_dir, "ndc-extraction", "x")
-dir_y = os.path.join(base_dir, "ndc-extraction", "y")
-glove_dir = os.path.join(base_dir, "glove-embeddings")
-
-def encode_sentences(weights):
+def encode_sentences(base_dir, weights):
     dir_y = os.listdir(os.path.join(base_dir, "ndc-extraction", "y"))
     dir_y = [x for x in dir_y if ".txt" in x]
     file = os.path.join(base_dir, "obj/merge/sdg_indexes.txt")
-    classes = []
+    class_data = []
     html_i = []
     files = []
     f = open(file)
     for line in f:
         l = line.strip().split(" ")
-        classes.append(l[0])
+        class_data.append(l[0])
         html_i.append(int(l[1]) - (int(l[1])//100)*100)
         files.append(l[2])
     f.close()
-    sent_encodings = np.array((len(sdg), 100))
-    for i, val in enumerate(sdg):
-        dim_1 = ls_y.index(files[i])
+    sent_encodings = np.zeros((len(class_data), 100))
+    for i, val in enumerate(class_data):
+        dim_1 = dir_y.index(files[i])
         dim_2 = html_i[i]
-        current_encoding = sent_enc[dim_1, dim_2,]
+        current_encoding = weights[dim_1, dim_2,]
         sent_encodings[i] = current_encoding
     return(sent_encodings)
-
 
 def load_data(dir_x, dir_y):
     base_dir = os.getcwd()
@@ -90,39 +83,22 @@ def load_data(dir_x, dir_y):
         if len(i) < 100:
             i[len(i):100] = [0] * (100 - len(i))
         temp = [int(x) for x in i]
-        #temp = to_one_hot(temp)
         binary_y.append(temp)
     return(seq_x, binary_y, tokenizer)
 
-
-def load_embeddings(glove_dir, word_index, max_words, embedding_dim):
-    print('### Loading {} dimensional GloVe embeddings for top {} words ###'.format(embedding_dim, max_words))
-    embeddings_index = {}
-    f = open(os.path.join(glove_dir, 'glove.6B.300d.txt'))
-    for line in f:
-        values = line.split()
-        word = values[0]
-        coefs = np.asarray(values[1:], dtype = 'float32')
-        embeddings_index[word] = coefs
-    f.close()
-
-    word_index = tokenizer.word_index
-    embedding_matrix = np.zeros((max_words, embedding_dim))
-    for word, i in word_index.items():
-        if i < max_words:
-            embedding_vector = embeddings_index.get(word)
-            if embedding_vector is not None:
-                embedding_matrix[i] = embedding_vector
-    return(embedding_matrix)
-
 class HierarchicalAttn():
     'Constructs a model with attention over words and Bidirectional GRU over sentences to encode sentences'
-    def __init__(self, model, max_len, max_sentence, vocab_size, word_embedding, embedding_weights):
+    def __init__(self, model, max_len, max_sentence, vocab_size, embedding_weights, train_x, train_y, test_x, test_y, base_dir):
         self.model = None
         self.max_len = 30
+        self.train_x = train_x
+        self.train_y = train_y
+        self.test_x = test_x
+        self.test_y = test_y
         self.max_sentence = 100
         self.vocab_size = 10000
         self.embedding_weights = embedding_weights
+        self.base_dir = base_dir
 
     def weight_samples(self, train_y):
         'Weight binary classes based on their relative frequency'
@@ -178,37 +154,23 @@ class HierarchicalAttn():
     
     def train(self, train_x, train_y):
         'Encode x, y data and fit model'
-        encoded_train_x = self.encode_texts(train_x)
-        encoded_test_x = self.encode_texts(test_x)
-        encoded_test_y = self.encode_y(test_y)
-        encoded_train_y = self.encode_y(train_y)
-        encoded_all = self.encode_texts(data_x)
-        sample_weights = self.weight_samples(train_y)
+        encoded_train_x = self.encode_texts(self.train_x)
+        encoded_test_x = self.encode_texts(self.test_x)
+        encoded_test_y = self.encode_y(self.test_y)
+        encoded_train_y = self.encode_y(self.train_y)
+        encoded_all = self.encode_texts(self.test_x + self.train_x)
+        sample_weights = self.weight_samples(self.train_y)
         csv_logger = CSVLogger("log_encoder.csv", append = False, separator = ",")
         self.model = self.build_model()
-        self.model.fit(encoded_train_x, encoded_train_y, epochs = 5, validation_split = 0.25, batch_size = 10,
+        self.model.fit(encoded_train_x, encoded_train_y, epochs = 3, validation_split = 0.25, batch_size = 10,
                         sample_weight = sample_weights,  callbacks = [csv_logger])
         preds = self.model.predict(encoded_test_x)
-        return(model)
 
         # Extract second LSTM output for the sentence representation to be transfered to sentence classifier
         intermediate_layer_model = Model(inputs=self.model.input,
                                          outputs=self.model.get_layer("sentence_encoder").output)
         intermediate_output = intermediate_layer_model.predict(encoded_all)
-        encoded_sentences = encode_sentences(intermediate_output)
+        encoded_sentences = encode_sentences(self.base_dir, intermediate_output)
         print(encoded_sentences.shape)
         save_obj(encoded_sentences, "sentence_encoding")
         save_obj(preds, "sentence_extraction")
-
-if __name__ == "__main__":
-    data_x, data_y, tokenizer = load_data(dir_x, dir_y)
-    train_x, train_y, validation_x, validation_y, test_x, test_y = split_train(training_samples = 430,
-                                                                            validation_samples = 1,
-                                                                            test_samples = 10,
-                                                                            shuffle = False,
-                                                                            x = data_x,
-                                                                            y = data_y)
-
-    embedding_weights = load_embeddings(glove_dir, tokenizer.word_index, 10000, 300)
-    h = HierarchicalAttn(None, 30, 500, 10000, 300, embedding_weights)
-    h.train(train_x, train_y)
