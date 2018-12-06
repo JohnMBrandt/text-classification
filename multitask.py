@@ -75,15 +75,16 @@ def load_data(dir_x, dir_y):
     for i in data_x:
         if len(i) < 100:
             i[len(i):100] = [''] * (100 - len(i))
-        temp = (doc_tokenizer.texts_to_sequences(i))
-        temp = pad_sequences(temp, 30, value = 0)
-        seq_x.append(temp)
+        word_sequence = doc_tokenizer.texts_to_sequences(i)
+        word_sequence = pad_sequences(word_sequence, 30, value = 0)
+        seq_x.append(word_sequence)
 
     for i in data_y:
         if len(i) < 100:
             i[len(i):100] = [0] * (100 - len(i))
-        temp = [int(x) for x in i]
-        binary_y.append(temp)
+        class_i = [int(x) for x in i]
+        binary_y.append(class_i)
+
     return(seq_x, binary_y, doc_tokenizer)
 
 def encode_texts(texts):
@@ -105,7 +106,6 @@ def encode_y(y):
 
 def weight_data(train_y, n_classes):
     'Weights sentence classification loss function by class frequency'
-    class_freq = []
     class_weights = {}
     for i in range(0, n_classes):
         count = sum(train_y[:,i])
@@ -155,9 +155,9 @@ def build_model():
     sentence_in = Input(shape = (30,), dtype = "int32")
     embedded_word_seq = Embedding(10000, 300, input_length = 30, trainable = False, 
                                 weights = [doc_embedding_matrix])(sentence_in)
-    embedded_word_seq_learn = Embedding(10000, 300, input_length = 30, trainable = True)(sentence_in)
-    embedding_concat = concatenate([embedded_word_seq, embedded_word_seq_learn])
-    word_encoder = Bidirectional(GRU(50, return_sequences = True, kernel_regularizer = l2_reg))(embedding_concat)
+    #embedded_word_seq_learn = Embedding(10000, 300, input_length = 30, trainable = True)(sentence_in)
+    #embedding_concat = concatenate([embedded_word_seq, embedded_word_seq_learn])
+    word_encoder = Bidirectional(GRU(50, return_sequences = True, kernel_regularizer = l2_reg))(embedded_word_seq)
     dense_transform_w = Dense(100, activation = "relu", name = "dense_transform_w", kernel_regularizer = l2_reg)(word_encoder)
     attn_weighted_sent = Model(sentence_in, Attention(name = 'word_attention', regularizer = l2_reg)(dense_transform_w))
     attn_weighted_sent.summary()
@@ -230,6 +230,7 @@ if __name__ == "__main__":
     sentence_x = []
     sentence_y = np.empty(17)
     sentence_id = []
+    ## Make sure class_data is 1... not 0...
     for i in class_data:
         file_t = open("ndc-data/" + str(i-1) + ".txt", encoding = "ISO-8859-1")
         y_temp = class_y.get(i-1)
@@ -267,7 +268,8 @@ if __name__ == "__main__":
     model.fit(x = [tr_sentence_x, tr_doc_x, tr_id], y = [tr_sentence_y, tr_doc_y], shuffle = True, sample_weight = {"ts_doc_y" : sample_weights},
               class_weight = {"ts_sentence_y" : class_weights}, epochs = 2, batch_size = 1)
 
-    preds = model.predict([ts_sentence_x, ts_doc_x, ts_id])
-    save_obj(preds, "preds_multi")
+    preds = model.predict([ts_sentence_x, ts_doc_x, ts_id], batch_size = 1)
+    save_obj(preds, "preds_multi_fixed")
+    save_obj(tr_doc_y, "doc_y")
     save_obj(ts_sentence_y, "sentence_y")
     save_obj(ts_doc_y, "doc_y")
