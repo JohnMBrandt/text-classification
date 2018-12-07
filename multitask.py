@@ -66,7 +66,7 @@ def load_data(dir_x, dir_y):
         data_y.append(temp)
 
     print("### Generating tokenizer ###")
-    doc_tokenizer = Tokenizer(num_words = 10000)
+    doc_tokenizer = Tokenizer(num_words = max_words)
     doc_tokenizer.fit_on_texts(data_x)
     doc_word_index = doc_tokenizer.word_index
     seq_x = []
@@ -76,7 +76,7 @@ def load_data(dir_x, dir_y):
         if len(i) < 100:
             i[len(i):100] = [''] * (100 - len(i))
         word_sequence = doc_tokenizer.texts_to_sequences(i)
-        word_sequence = pad_sequences(word_sequence, 30, value = 0)
+        word_sequence = pad_sequences(word_sequence, sentence_len, value = 0)
         seq_x.append(word_sequence)
 
     for i in data_y:
@@ -89,7 +89,7 @@ def load_data(dir_x, dir_y):
 
 def encode_texts(texts):
     'Reformat X data to be 3 dimensional array (docs, sentences, words)'
-    encoded_texts = np.zeros((len(texts), 100, 30))
+    encoded_texts = np.zeros((len(texts), 100, sentence_len))
     for i, text in enumerate(texts):
         encoded_text = np.array(text)[:100]
         encoded_texts[i][-len(encoded_text):] = encoded_text
@@ -147,14 +147,14 @@ def load_embeddings(max_words, word_index = None, embedding_dim = 300):
                 embedding_matrix[i] = embedding_vector
     return(embedding_matrix)
 
-def build_model():
+def build_model(sentence_len, max_words, doc_embedding, sent_embedding):
     'Constructs the multi-task training extractor/classifier model'
     l2_reg = regularizers.l2(1e-6)
-    l1_l2reg = regularizers.l1_l2(1e-4)
+    l1_l2reg = regularizers.l1_l2(1e-5)
     ## word encoder - extractor
-    sentence_in = Input(shape = (30,), dtype = "int32")
-    embedded_word_seq = Embedding(10000, 300, input_length = 30, trainable = False, 
-                                weights = [doc_embedding_matrix])(sentence_in)
+    sentence_in = Input(shape = (sentence_len,), dtype = "int32")
+    embedded_word_seq = Embedding(max_words, 300, input_length = sentence_len, trainable = False, 
+                                weights = [doc_embedding])(sentence_in)
     #embedded_word_seq_learn = Embedding(10000, 300, input_length = 30, trainable = True)(sentence_in)
     #embedding_concat = concatenate([embedded_word_seq, embedded_word_seq_learn])
     word_encoder = Bidirectional(GRU(50, return_sequences = True, kernel_regularizer = l2_reg))(embedded_word_seq)
@@ -163,9 +163,9 @@ def build_model():
     attn_weighted_sent.summary()
 
     # Inputs - sentence encoder - extractor
-    class_input = Input(shape = (30,), dtype = "int32", name = "CL_input")
+    class_input = Input(shape = (sentence_len,), dtype = "int32", name = "CL_input")
     class_ids = Input(shape = (1,), dtype = "int32", name = "CL_IDs")
-    texts_in = Input(shape=(100, 30), dtype='int32')
+    texts_in = Input(shape=(100, sentence_len), dtype='int32')
 
     # sentence encoder - extractor
     attention_weighted_sentences = TimeDistributed(attn_weighted_sent, name = "EX_sent_attn")(texts_in)
@@ -177,14 +177,13 @@ def build_model():
     output_extractor = TimeDistributed(Dense(1, activation = "sigmoid", name = "EX_out"))(dropout_extractor)
 
     # sentence classifier
-    embedded_words = Embedding(10000, 300, input_length = 30, trainable = False, name = "CL_embed",
-                            weights = [sent_embedding_matrix])(class_input)
+    embedded_words = Embedding(max_words, 300, input_length = sentence_len, trainable = False, name = "CL_embed",
+                            weights = [sent_embedding])(class_input)
     rnn = Bidirectional(GRU(50, return_sequences = True, name = "CL_RNN", kernel_regularizer = l2_reg))(embedded_words)
     dense_w = TimeDistributed(Dense(100, kernel_regularizer = l2_reg, name = "CL_dense"))(rnn)
     attn = AttentionWithContext(name = "CL_attn")(dense_w)
     merge_layer = concatenate([attn, sentence_matcher], name = "CL_merging")
-    #dense_merged = Dense(100, activation = "relu", kernel_regularizer = l2_reg, name = "CL_dense_2")(merge_layer)
-    output_classifier = Dense(17, activation = "sigmoid")(merge_layer)
+    output_classifier = Dense(n_classes, activation = "sigmoid")(merge_layer)
 
     model = Model(inputs = [class_input, texts_in, class_ids],  outputs = [output_classifier, output_extractor])
     model.summary()
@@ -193,9 +192,7 @@ def build_model():
                 metrics = {'dense_1': [top_1_accuracy, top_3_accuracy], 'time_distributed_2' : ['acc']})
     return(model)
 
-
-if __name__ == "__main__":
-    ## Load in helper files
+def main():
     base_dir = os.getcwd()
     dir_x = os.path.join(base_dir, "ndc-extraction/x")
     dir_y = os.path.join(base_dir, "ndc-extraction/y")
@@ -228,9 +225,9 @@ if __name__ == "__main__":
     document_y = encode_y(document_y_expanded)
 
     sentence_x = []
-    sentence_y = np.empty(17)
+    sentence_y = np.empty(n_classes)
     sentence_id = []
-    ## Make sure class_data is 1... not 0...
+
     for i in class_data:
         file_t = open("ndc-data/" + str(i-1) + ".txt", encoding = "ISO-8859-1")
         y_temp = class_y.get(i-1)
@@ -240,36 +237,59 @@ if __name__ == "__main__":
         sentence_y = np.vstack([sentence_y, [multihot(y_temp)]])
     sentence_y = sentence_y[1:]
 
-    sent_tokenizer =  Tokenizer(10000)
+    sent_tokenizer =  Tokenizer(max_words)
     sent_tokenizer.fit_on_texts(sentence_x)
     sentence_x = sent_tokenizer.texts_to_sequences(sentence_x)
     sentence_x = pad_sequences(sentence_x, maxlen = 30)
 
     ##### split train / val
-    tr_sentence_x = sentence_x[0:5000]
-    tr_doc_x = document_x[0:5000]
-    tr_id = np.array(html_i[0:5000])
-    tr_sentence_y = sentence_y[0:5000]
-    tr_doc_y = document_y[0:5000]
+    tr_sentence_x = sentence_x[0:training_samples]
+    tr_doc_x = document_x[0:training_samples]
+    tr_id = np.array(html_i[0:training_samples])
+    tr_sentence_y = sentence_y[0:training_samples]
+    tr_doc_y = document_y[0:training_samples]
 
-    ts_sentence_x = sentence_x[5000:]
-    ts_doc_x = document_x[5000:]
-    ts_id = np.array(html_i[5000:])
-    ts_sentence_y = sentence_y[5000:]
-    ts_doc_y = document_y[5000:]
+    ts_sentence_x = sentence_x[training_samples:]
+    ts_doc_x = document_x[training_samples:]
+    ts_id = np.array(html_i[training_samples:])
+    ts_sentence_y = sentence_y[training_samples:]
+    ts_doc_y = document_y[training_samples:]
 
-    doc_embedding_matrix = load_embeddings(10000, doc_tokenizer.word_index, 300)
-    sent_embedding_matrix = load_embeddings(10000, sent_tokenizer.word_index, 300)
-    class_weights = weight_data(ts_sentence_y, 17)
+    doc_embedding_matrix = load_embeddings(max_words, doc_tokenizer.word_index, 300)
+    sent_embedding_matrix = load_embeddings(max_words, sent_tokenizer.word_index, 300)
+    class_weights = weight_data(ts_sentence_y, n_classes)
     sample_weights = weight_samples(ts_doc_y)
 
+    model = build_model(sentence_len = sentence_len, max_words = max_words,
+        sent_embedding = sent_embedding_matrix, doc_embedding = doc_embedding_matrix)
 
-    model = build_model()
-    model.fit(x = [tr_sentence_x, tr_doc_x, tr_id], y = [tr_sentence_y, tr_doc_y], shuffle = True, sample_weight = {"ts_doc_y" : sample_weights},
-              class_weight = {"ts_sentence_y" : class_weights}, epochs = 2, batch_size = 1)
+    model.fit(x = [tr_sentence_x, tr_doc_x, tr_id], y = [tr_sentence_y, tr_doc_y], shuffle = True, 
+        sample_weight = {"ts_doc_y" : sample_weights}, class_weight = {"ts_sentence_y" : class_weights}, 
+        epochs = epochs, batch_size = 1, validation_data = ([ts_sentence_x, ts_doc_x, ts_id], [ts_sentence_y, ts_doc_y]))
 
     preds = model.predict([ts_sentence_x, ts_doc_x, ts_id], batch_size = 1)
     save_obj(preds, "preds_multi_fixed")
     save_obj(tr_doc_y, "doc_y")
     save_obj(ts_sentence_y, "sentence_y")
     save_obj(ts_doc_y, "doc_y")
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description = "main",
+        formatter_class = argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument('--epochs', default = 2, type = int)
+    parser.add_argument('--training_samples', default = 5000, type = int)
+    parser.add_argument('--n_classes', default = 17, type = int)
+    parser.add_argument('--sentence_len', default = 30, type = int)
+    parser.add_argument('--max_words', default = 10000, type = int)
+    parser.add_argument('--base_dir', default = os.getcwd())
+
+    args = parser.parse_args()
+    epochs = args.epochs
+    training_samples = args.training_samples
+    n_classes = args.n_classes
+    sentence_len = args.sentence_len
+    max_words = args.max_words
+
+    main()
