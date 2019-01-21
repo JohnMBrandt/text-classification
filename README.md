@@ -10,7 +10,7 @@ This architecture reconstructs the multilabel classification of sentences by lev
 Python 3.6 is required and the dependences can be installed with:
 
  ```
- python setup.py --install
+ pip3 install -r requirements.txt
  ```
 ### Usage
 
